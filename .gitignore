@@ -1,0 +1,44 @@
+# Runtime and cache files
+addon/solar_forecast_cache.json
+addon/sunset_cache.json
+addon/ha_sensor_data.pickle
+addon/charging_state.json
+addon/discovery_published.json
+
+# Data directory contents
+addon/data/
+/data/
+
+# Logs
+*.log
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.devcontainer/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+
+# Backup files
+*.bak
+*.backup
+
+# Local configuration overrides (if any)
+local_config.json
