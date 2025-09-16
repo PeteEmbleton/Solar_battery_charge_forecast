@@ -3,7 +3,7 @@
   "version": "1.0.5",
   "slug": "solar_forecast_battery",
   "description": "Solar production forecasting and battery charging optimization",
-  "url": "https://github.com/yourusername/repository",
+  "url": "https://github.com/PeteEmbleton/Solar_battery_charge_forecast",
   "arch": [
     "armhf",
     "armv7",
