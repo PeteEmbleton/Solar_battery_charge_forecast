@@ -8,7 +8,7 @@ addon/discovery_published.json
 # Data directory contents
 addon/data/
 /data/
-.devcontainer
+.devcontainer/
 
 # Logs
 *.log
