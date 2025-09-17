@@ -1,6 +1,6 @@
 {
   "name": "Solar Forecast and Battery Control",
-  "version": "1.0.5",
+  "version": "2.0.0",
   "slug": "solar_forecast_battery",
   "description": "Solar production forecasting and battery charging optimization",
   "url": "https://github.com/PeteEmbleton/Solar_battery_charge_forecast",
@@ -39,7 +39,8 @@
     "mqtt_broker": "mqtt://core-mosquitto",
     "mqtt_broker_port": 1883,
     "mqtt_username": "your_mqtt_username",
-    "mqtt_password": "your_mqtt_password"
+    "mqtt_password": "your_mqtt_password",
+    "max_battery_charge_rate": 5000
   },
   "schema": {
     "ha_url": "str",
@@ -63,6 +64,7 @@
     "mqtt_broker": "str",
     "mqtt_broker_port": "int",
     "mqtt_username": "str",
-    "mqtt_password": "str"
+    "mqtt_password": "str",
+    "max_battery_charge_rate": "int"
   }
 }

@@ -13,6 +13,7 @@ Specifically designed for **Fronius inverters** with Modbus TCP control. Tested 
 - **🏠 Power Usage Prediction** - Learns from your historical consumption patterns
 - **🌅 Sun Integration** - Uses Home Assistant's sunrise/sunset data for optimal timing
 - **📈 Real-time Monitoring** - Comprehensive status updates via MQTT
+- **🛡️ Safety Controls** - Configurable maximum charge rate with automatic limiting
 
 ## 🎯 How It Works
 

@@ -20,8 +20,10 @@ RUN pip3 install --no-cache-dir pymodbus --break-system-packages
 COPY startup.sh /startup.sh
 COPY full_forecast_and_reccomendation.py /app/full_forecast_and_reccomendation.py
 COPY mqtt_discovery.py /app/mqtt_discovery.py
+COPY simple_battery_test.py /app/simple_battery_test.py
+COPY battery_test.sh /app/battery_test.sh
 
 # Make scripts executable
-RUN chmod +x /startup.sh
+RUN chmod +x /startup.sh /app/battery_test.sh
 
 CMD ["/startup.sh"]

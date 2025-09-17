@@ -6,7 +6,10 @@ from sklearn.linear_model import LinearRegression
 import json
 import os
 from urllib.parse import quote
-from pymodbus.client import ModbusTcpClient
+try:
+    from pymodbus.client.sync import ModbusTcpClient
+except ImportError:
+    from pymodbus.client import ModbusTcpClient
 import argparse
 import logging
 import time
@@ -28,8 +31,8 @@ parser.add_argument("--minimum_soc_by_sunset", type=float, required=True)
 parser.add_argument("--cheap_power_window_start", required=True)
 parser.add_argument("--cheap_power_window_end", required=True)
 parser.add_argument("--fronius_host", required=True)
-parser.add_argument("--cache_forecast", type=bool, required=True, default=True)
-parser.add_argument("--cache_duration", type=int, required=True, default=120)
+parser.add_argument("--cache_forecast", type=bool, required=False, default=True)
+parser.add_argument("--cache_duration", type=int, required=False, default=120)
 parser.add_argument("--battery_charge_efficiency", type=int, default=95)
 parser.add_argument("--ha_days_to_retrieve", type=int, default=30)
 parser.add_argument("--HA_battery_charge_rate_sensor", type=str, default="sensor.solarnet_power_battery_charge")
@@ -40,8 +43,15 @@ parser.add_argument("--mqtt_broker_port", type=int, default=1883, help="MQTT bro
 parser.add_argument("--mqtt_topic_prefix", default="solar_forecast", help="MQTT topic prefix for publishing data")
 parser.add_argument("--mqtt_username", default="", help="MQTT username")
 parser.add_argument("--mqtt_password", default="", help="MQTT password")
+parser.add_argument("--max_battery_charge_rate", type=int, default=5000, help="Maximum battery charge rate in watts")
 
-args = parser.parse_args()
+# Only parse arguments if running as main script
+if __name__ == "__main__":
+    args = parser.parse_args()
+else:
+    # Create dummy args object for imports
+    import argparse
+    args = argparse.Namespace()
 
 
 # Get Home Assistant API token from add-on environment
@@ -65,6 +75,7 @@ DAYS_OF_HA_POWER_HISTORY = args.ha_days_to_retrieve  # Days of Home Assistant po
 HA_BATTERY_CHARGE_RATE_SENSOR = args.HA_battery_charge_rate_sensor
 HA_BATTERY_SOC_SENSOR = args.HA_battery_SOC_sensor
 HA_POWER_USAGE_SENSOR = args.HA_power_usage_sensor
+MAX_BATTERY_CHARGE_RATE = args.max_battery_charge_rate
 
 
 # --- Configuration ---
@@ -259,14 +270,19 @@ for date in dates:
     min_soc = soc_stats[date]["min"]
     max_soc = soc_stats[date]["max"]
 
+    # Convert SOC delta from percentage to energy (kWh)
+    soc_delta_percent = max_soc - min_soc
+    soc_delta_kwh = (soc_delta_percent / 100.0) * BATTERY_SIZE_KWH
+
     forecast_data.append({
         "Date": pd.to_datetime(date),
         "Battery_Charge": float(battery_charge),
         "Load_Consumed": float(load_consumed),
         "Battery_Min_SOC": min_soc,
         "Battery_Max_SOC": max_soc,
-        "SOC_Delta": max_soc - min_soc,
-        "Power_Need": load_consumed - battery_charge + (max_soc - min_soc),
+        "SOC_Delta": soc_delta_percent,
+        "SOC_Delta_kWh": soc_delta_kwh,
+        "Power_Need": load_consumed - battery_charge + soc_delta_kwh * 1000,  # Convert kWh to Wh for consistency
         "DayOfWeek": pd.to_datetime(date).weekday()
     })
 
@@ -450,62 +466,169 @@ def calculate_charge_rate(deficit_kwh, window_start, window_end, current_time=No
 
 
 
-def charge_battery_from_mains(charge_rate, retries=3):
-    for attempt in range(retries):
-        client = ModbusTcpClient(FRONIUS_HOST, port=502, timeout=5)
-        try:
-            if not client.connect():
-                logger.error(f"Connection attempt {attempt + 1} failed")
-                if attempt == retries - 1:
-                    return False
-                continue
+def force_charge_inverter(charging_power, fronius_host=None):
+    """
+    Performs the Modbus commands to force the inverter to charge.
 
-            # Set charging mode
-            write_result = client.write_register(40348, 3, slave=1)
-            if write_result.isError():
-                logger.error(f"Error starting charge: {write_result}")
-                return False
+    Args:
+        charging_power (int): The desired charging power in Watts, e.g., 2000.
+        fronius_host (str): Host IP address (uses FRONIUS_HOST if None)
+    """
+    host = fronius_host or FRONIUS_HOST
 
-            # Set charge rate
-            write_result = client.write_register(40356, charge_rate, slave=1)
-            if write_result.isError():
-                logger.error(f"Error setting charge rate: {write_result}")
-                return False
+    # Apply maximum charge rate limit
+    if charging_power > MAX_BATTERY_CHARGE_RATE:
+        logger.warning(f"Requested charging power {charging_power}W exceeds maximum {MAX_BATTERY_CHARGE_RATE}W. Limiting to {MAX_BATTERY_CHARGE_RATE}W.")
+        charging_power = MAX_BATTERY_CHARGE_RATE
 
-            logger.info(f"Successfully set charge rate to {charge_rate} watts")
-            return True
+    client = None  # Initialize client to None
 
-        except Exception as e:
-            logger.error(f"Error on attempt {attempt + 1}: {e}")
-            if attempt == retries - 1:
-                return False
-        finally:
-            client.close()
-
-        time.sleep(1)  # Wait before retry
-    return False
-
-def stop_battery_charging():
-    # Connect to Fronius inverter
-    client = ModbusTcpClient(FRONIUS_HOST, port=502)
     try:
-        if client.connect():
-            # --- STOP CHARGING ---
-            # To stop the external charge command, you can switch back to Normal Mode (1)
-            # or Disable (2) or External Control (0). Normal Mode is a good default.
-            write_result = client.write_register(40348, 1, slave=1)
+        client = ModbusTcpClient(host, port=502)
+        if not client.connect():
+            logger.error("Failed to connect to the inverter.")
+            return False
 
-            if write_result.isError():
-                print(f"Error stopping charge: {write_result}")
-            else:
-                print("🛑 Successfully commanded the battery to stop external charging (switched to Normal Mode).")
+        # 1. Force charging mode
+        register_40348 = 40348
+        value_40348 = 2
+        result_1 = client.write_register(register_40348, value_40348)
+        if result_1.isError():
+            logger.error(f"Error writing to register {register_40348}: {result_1}")
+            return False
 
+        logger.info(f"Set charging mode (register {register_40348}) to {value_40348}.")
+
+        # 2. Determine and set charging power
+        register_40355 = 40355
+
+        if charging_power < 10:
+            value_40355 = 55536
+            logger.info("Charging power is low (< 10W). Setting minimum charging value.")
         else:
-            print("❌ Failed to connect to the Modbus device.")
+            scaled_power = -int(charging_power / 10)
+            value_40355 = 65536 + scaled_power
+            logger.info(f"Setting charging power to {charging_power}W. Scaled value: {scaled_power}.")
+
+        result_2 = client.write_register(register_40355, value_40355)
+        if result_2.isError():
+            logger.error(f"Error writing to register {register_40355}: {result_2}")
+            return False
+
+        logger.info(f"Set charging power (register {register_40355}) to {value_40355}.")
+
+        # 3. Set SOC limit
+        register_40350 = 40350
+        value_40350 = 9900
+        result_3 = client.write_register(register_40350, value_40350)
+        if result_3.isError():
+            logger.error(f"Error writing to register {register_40350}: {result_3}")
+            return False
+
+        logger.info(f"Set SOC limit (register {register_40350}) to {value_40350} (99%).")
+
+        logger.info("Inverter charging successfully initiated.")
+        return True
 
     finally:
-        # Always close the connection
+        if client:  # Check if the client object exists before closing
+            client.close()
+
+def read_battery_status(fronius_host=None):
+    """Read current battery control mode and charge rate"""
+    host = fronius_host or FRONIUS_HOST
+    client = ModbusTcpClient(host, port=502, timeout=10)
+    try:
+        if not client.connect():
+            logger.error("Failed to connect to Fronius inverter")
+            return None, None
+
+        # Read current control mode (register 40348)
+        mode_result = client.read_holding_registers(40347, 1, unit=1)  # 40348-1 for 0-based
+        if mode_result.isError():
+            logger.error(f"Error reading control mode: {mode_result}")
+            return None, None
+
+        # Read current charge rate (register 40356)
+        rate_result = client.read_holding_registers(40355, 1, unit=1)  # 40356-1 for 0-based
+        if rate_result.isError():
+            logger.error(f"Error reading charge rate: {rate_result}")
+            return mode_result.registers[0], None
+
+        control_mode = mode_result.registers[0]
+        charge_rate = rate_result.registers[0]
+
+        mode_names = {0: "External Control", 1: "Normal Mode", 2: "Disable", 3: "External Charge"}
+        mode_name = mode_names.get(control_mode, f"Unknown ({control_mode})")
+
+        logger.info(f"Current status - Mode: {mode_name}, Charge Rate: {charge_rate}W")
+        return control_mode, charge_rate
+
+    except Exception as e:
+        logger.error(f"Error reading battery status: {e}")
+        return None, None
+    finally:
         client.close()
+
+def reset_inverter_settings(fronius_host=None):
+    """
+    Resets the Modbus registers to return control to the inverter's
+    automatic charging and discharging logic.
+    """
+    host = fronius_host or FRONIUS_HOST
+    client = None
+
+    try:
+        client = ModbusTcpClient(host, port=502)
+        if not client.connect():
+            logger.error("Failed to connect to the inverter.")
+            return False
+
+        # 1. Reset charging mode to automatic (value 0)
+        register_40348 = 40348
+        value_40348 = 0
+        result_1 = client.write_register(register_40348, value_40348)
+        if result_1.isError():
+            logger.error(f"Error writing to register {register_40348}: {result_1}")
+            return False
+        logger.info(f"Reset charging mode (register {register_40348}) to {value_40348}.")
+
+        # 2. Reset input charging power rate
+        register_40355 = 40355
+        value_40355 = 10000
+        result_2 = client.write_register(register_40355, value_40355)
+        if result_2.isError():
+            logger.error(f"Error writing to register {register_40355}: {result_2}")
+            return False
+        logger.info(f"Reset input charging power rate (register {register_40355}) to {value_40355}.")
+
+        # 3. Reset minimum SOC to 5% (value 500)
+        register_40350 = 40350
+        value_40350 = 500
+        result_3 = client.write_register(register_40350, value_40350)
+        if result_3.isError():
+            logger.error(f"Error writing to register {register_40350}: {result_3}")
+            return False
+        logger.info(f"Reset minimum SOC (register {register_40350}) to {value_40350} (5%).")
+
+        # 4. Reset maximum discharge power rate
+        register_40356 = 40356
+        value_40356 = 10000
+        result_4 = client.write_register(register_40356, value_40356)
+        if result_4.isError():
+            logger.error(f"Error writing to register {register_40356}: {result_4}")
+            return False
+        logger.info(f"Reset maximum discharge power rate (register {register_40356}) to {value_40356}.")
+
+        logger.info("Inverter settings successfully reset to automatic mode.")
+        return True
+
+    except Exception as e:
+        logger.error(f"Error in reset_inverter_settings: {e}")
+        return False
+    finally:
+        if client:
+            client.close()
 
 
 
@@ -631,7 +754,7 @@ else:
 if should_charge and not currently_charging:
     # Start charging
     print("🔌 Starting battery charge from mains")
-    if charge_battery_from_mains(charge_rate):
+    if force_charge_inverter(charge_rate):
         currently_charging = True
         save_charging_state(True)
     else:
@@ -641,7 +764,7 @@ if should_charge and not currently_charging:
 elif not should_charge and currently_charging:
     # Stop charging
     print("🛑 Stopping battery charge")
-    stop_battery_charging()
+    reset_inverter_settings()
     currently_charging = False
     save_charging_state(False)
 elif should_charge and currently_charging:

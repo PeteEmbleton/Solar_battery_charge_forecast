@@ -31,6 +31,7 @@ MQTT_BROKER_PORT=$(bashio::config 'mqtt_broker_port')
 MQTT_TOPIC_PREFIX=$(bashio::config 'mqtt_topic_prefix')
 MQTT_USERNAME=$(bashio::config 'mqtt_username')
 MQTT_PASSWORD=$(bashio::config 'mqtt_password')
+MAX_BATTERY_CHARGE_RATE=$(bashio::config 'max_battery_charge_rate')
 
 # Wait a bit for MQTT broker to be ready
 bashio::log.info "Waiting for MQTT broker to be ready..."
@@ -53,27 +54,46 @@ else
     bashio::log.warning "MQTT Discovery failed, but continuing with main service"
 fi
 
-# Start the main forecast service
-bashio::log.info "Starting main solar forecast service..."
-exec python3 /app/full_forecast_and_reccomendation.py \
-    --ha_url "${HA_URL}" \
-    --ha_token "${HA_TOKEN}" \
-    --system_size_kw "${SYSTEM_SIZE_KW}" \
-    --battery_size_kwh "${BATTERY_SIZE_KWH}" \
-    --minimum_soc_percent "${MINIMUM_SOC_PERCENT}" \
-    --minimum_soc_by_sunset "${MINIMUM_SOC_BY_SUNSET}" \
-    --cheap_power_window_start "${CHEAP_POWER_WINDOW_START}" \
-    --cheap_power_window_end "${CHEAP_POWER_WINDOW_END}" \
-    --fronius_host "${FRONIUS_HOST}" \
-    --cache_forecast "${CACHE_FORECAST}" \
-    --cache_duration "${CACHE_DURATION}" \
-    --battery_charge_efficiency "${BATTERY_CHARGE_EFFICIENCY}" \
-    --ha_days_to_retrieve "${HA_DAYS_TO_RETRIEVE}" \
-    --HA_battery_charge_rate_sensor "${HA_BATTERY_CHARGE_RATE_SENSOR}" \
-    --HA_battery_SOC_sensor "${HA_BATTERY_SOC_SENSOR}" \
-    --HA_power_usage_sensor "${HA_POWER_USAGE_SENSOR}" \
-    --mqtt_broker "${MQTT_BROKER}" \
-    --mqtt_broker_port "${MQTT_BROKER_PORT}" \
-    --mqtt_topic_prefix "${MQTT_TOPIC_PREFIX}" \
-    --mqtt_username "${MQTT_USERNAME}" \
-    --mqtt_password "${MQTT_PASSWORD}"
+# Get cron schedule from config
+CRON_SCHEDULE=$(bashio::config 'cron_schedule')
+
+# Create the cron command
+CRON_CMD="python3 /app/full_forecast_and_reccomendation.py \
+    --ha_url=\"${HA_URL}\" \
+    --ha_token=\"${HA_TOKEN}\" \
+    --system_size_kw=\"${SYSTEM_SIZE_KW}\" \
+    --battery_size_kwh=\"${BATTERY_SIZE_KWH}\" \
+    --minimum_soc_percent=\"${MINIMUM_SOC_PERCENT}\" \
+    --minimum_soc_by_sunset=\"${MINIMUM_SOC_BY_SUNSET}\" \
+    --cheap_power_window_start=\"${CHEAP_POWER_WINDOW_START}\" \
+    --cheap_power_window_end=\"${CHEAP_POWER_WINDOW_END}\" \
+    --fronius_host=\"${FRONIUS_HOST}\" \
+    --cache_forecast=\"${CACHE_FORECAST}\" \
+    --cache_duration=\"${CACHE_DURATION}\" \
+    --battery_charge_efficiency=\"${BATTERY_CHARGE_EFFICIENCY}\" \
+    --ha_days_to_retrieve=\"${HA_DAYS_TO_RETRIEVE}\" \
+    --HA_battery_charge_rate_sensor=\"${HA_BATTERY_CHARGE_RATE_SENSOR}\" \
+    --HA_battery_SOC_sensor=\"${HA_BATTERY_SOC_SENSOR}\" \
+    --HA_power_usage_sensor=\"${HA_POWER_USAGE_SENSOR}\" \
+    --mqtt_broker=\"${MQTT_BROKER}\" \
+    --mqtt_broker_port=\"${MQTT_BROKER_PORT}\" \
+    --mqtt_topic_prefix=\"${MQTT_TOPIC_PREFIX}\" \
+    --mqtt_username=\"${MQTT_USERNAME}\" \
+    --mqtt_password=\"${MQTT_PASSWORD}\" \
+    --max_battery_charge_rate=\"${MAX_BATTERY_CHARGE_RATE}\""
+
+# Set up cron job
+bashio::log.info "Setting up cron job with schedule: ${CRON_SCHEDULE}"
+echo "${CRON_SCHEDULE} ${CRON_CMD}" > /etc/crontabs/root
+
+# Make sure crontab file has correct permissions
+chmod 0600 /etc/crontabs/root
+
+# Make scripts executable
+chmod +x /app/full_forecast_and_reccomendation.py
+chmod +x /app/mqtt_discovery.py
+chmod +x /app/simple_battery_test.py
+
+# Start cron daemon and keep container running
+bashio::log.info "Starting cron daemon..."
+exec crond -f -l 8
