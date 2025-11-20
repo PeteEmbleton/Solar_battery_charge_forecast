@@ -32,6 +32,19 @@ MQTT_TOPIC_PREFIX=$(bashio::config 'mqtt_topic_prefix')
 MQTT_USERNAME=$(bashio::config 'mqtt_username')
 MQTT_PASSWORD=$(bashio::config 'mqtt_password')
 MAX_BATTERY_CHARGE_RATE=$(bashio::config 'max_battery_charge_rate')
+HA_mains_power_availble_sensor=$(bashio::config 'sensor.smart_meter_63a_1_meter_location')
+HA_mains_power_not_availble_sensor_value=$(bashio::config 'power_not_availble_sensor_value')
+MANUAL_ACTION=$(bashio::config 'manual_action')
+
+
+if [ "$MANUAL_ACTION" != "none" ]; then
+    bashio::log.info "Manual action detected: $MANUAL_ACTION"
+    /app/battery_test.sh "$MANUAL_ACTION"
+    # Reset the option to avoid repeated runs
+    bashio::log.info "Resetting manual_action to none"
+    jq '.manual_action="none"' /data/options.json > /data/options.json.tmp && mv /data/options.json.tmp /data/options.json
+fi
+
 
 # Wait a bit for MQTT broker to be ready
 bashio::log.info "Waiting for MQTT broker to be ready..."

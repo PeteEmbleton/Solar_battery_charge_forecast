@@ -16,6 +16,9 @@ import time
 import paho.mqtt.client as mqtt
 import pickle
 from pathlib import Path
+import sys
+
+print(datetime.now())
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -44,6 +47,8 @@ parser.add_argument("--mqtt_topic_prefix", default="solar_forecast", help="MQTT 
 parser.add_argument("--mqtt_username", default="", help="MQTT username")
 parser.add_argument("--mqtt_password", default="", help="MQTT password")
 parser.add_argument("--max_battery_charge_rate", type=int, default=5000, help="Maximum battery charge rate in watts")
+parser.add_argument("--HA_mains_power_availble_sensor", type=str, default="sensor.smart_meter_63a_1_meter_location")
+parser.add_argument("--HA_mains_power_availble_sensor_value", type=str, default="0")
 
 # Only parse arguments if running as main script
 if __name__ == "__main__":
@@ -76,6 +81,8 @@ HA_BATTERY_CHARGE_RATE_SENSOR = args.HA_battery_charge_rate_sensor
 HA_BATTERY_SOC_SENSOR = args.HA_battery_SOC_sensor
 HA_POWER_USAGE_SENSOR = args.HA_power_usage_sensor
 MAX_BATTERY_CHARGE_RATE = args.max_battery_charge_rate
+HA_MAINS_POWER_AVAILBLE_SENSOR = args.HA_mains_power_availble_sensor
+HA_MAINS_POWER_AVAILBLE_SENSOR_VALUE = args.HA_mains_power_availble_sensor_value
 
 
 # --- Configuration ---
@@ -156,6 +163,24 @@ def save_ha_data_cache(data):
         logger.info(f"Saved {len(data)} records to cache")
     except Exception as e:
         logger.error(f"Error saving cache: {e}")
+
+
+# Function to get power available sensor status from Home Assistant
+def check_mains_power_not_available():
+    url = f"{HA_URL}/api/states/{HA_MAINS_POWER_AVAILBLE_SENSOR}"
+    
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        state_data = response.json()
+        return state_data["state"]
+    else:
+        logger.error(f"Failed to get mains power not available sensor status: {response.status_code}")
+        return None
+    
+#if the mains power is not connected then exit
+if check_mains_power_not_available() != HA_MAINS_POWER_AVAILBLE_SENSOR_VALUE:
+    logger.info("Mains power not available, exiting script.")
+    sys.exit(0)
 
 all_sensor_data = get_cached_ha_data()
 
@@ -373,7 +398,7 @@ def get_ha_sun_data():
     """Get sunrise/sunset data from Home Assistant sun.sun entity"""
     try:
         api_endpoint = f"{HA_URL}/api/states/sun.sun"
-        response = requests.get(api_endpoint, headers=headers)
+        response = requests.get(api_endpoint, headers=headers, timeout=10)
         response.raise_for_status()
         sun_data = response.json()
 
@@ -381,24 +406,27 @@ def get_ha_sun_data():
         next_setting = attributes.get("next_setting")
         next_rising = attributes.get("next_rising")
 
+        # Ensure timezone available
+        tz_name = time_zone or "UTC"
+        try:
+            local_tz = ZoneInfo(tz_name)
+        except Exception:
+            logger.warning(f"Invalid timezone '{tz_name}', falling back to UTC")
+            local_tz = ZoneInfo("UTC")
+
+        sunset_time = None
+        sunset_dt_local = None
+        sunrise_time = None
+
         if next_setting:
-            # Parse the ISO format datetime and convert to local timezone
             sunset_dt_utc = datetime.fromisoformat(next_setting.replace('Z', '+00:00'))
-            # Convert to local timezone
-            local_tz = ZoneInfo(time_zone)
             sunset_dt_local = sunset_dt_utc.astimezone(local_tz)
             sunset_time = sunset_dt_local.strftime("%H:%M:%S")
-        else:
-            sunset_time = None
-            sunset_dt_local = None
 
-        # Handle next_rising similarly if present
         if next_rising:
             sunrise_dt_utc = datetime.fromisoformat(next_rising.replace('Z', '+00:00'))
             sunrise_dt_local = sunrise_dt_utc.astimezone(local_tz)
             sunrise_time = sunrise_dt_local.strftime("%H:%M:%S")
-        else:
-            sunrise_time = None
 
         logger.info(f"Retrieved sun data from Home Assistant: sunset={sunset_time} (local time)")
         return {
@@ -776,14 +804,12 @@ else:
 
 # --- MQTT Setup ---
 def setup_mqtt_client():
-    # Create client with unique ID to avoid connection conflicts
-    # Use the latest CallbackAPIVersion for paho-mqtt 2.x
+    # Create client with unique ID
+    client_id = f"solar_forecast_{int(time.time())}"
     try:
-        # Try new paho-mqtt 2.x syntax with latest version
-        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"solar_forecast_{int(time.time())}")
-    except (AttributeError, TypeError):
-        # Fallback to old syntax for paho-mqtt 1.x
-        client = mqtt.Client(client_id=f"solar_forecast_{int(time.time())}")
+        client = mqtt.Client(client_id=client_id)
+    except Exception:
+        client = mqtt.Client(client_id=client_id)
 
     # Set up connection callback to verify success
     connected = False

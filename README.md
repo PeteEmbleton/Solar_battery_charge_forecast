@@ -14,6 +14,7 @@ Specifically designed for **Fronius inverters** with Modbus TCP control. Tested 
 - **🌅 Sun Integration** - Uses Home Assistant's sunrise/sunset data for optimal timing
 - **📈 Real-time Monitoring** - Comprehensive status updates via MQTT
 - **🛡️ Safety Controls** - Configurable maximum charge rate with automatic limiting
+- **Power Failure controls** - will disbale charging when mains power is lost
 
 ## 🎯 How It Works
 

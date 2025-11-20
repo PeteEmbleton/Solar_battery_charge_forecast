@@ -1,6 +1,6 @@
 {
   "name": "Solar Forecast and Battery Control",
-  "version": "2.0.0",
+  "version": "3.0.2",
   "slug": "solar_forecast_battery",
   "description": "Solar production forecasting and battery charging optimization",
   "url": "https://github.com/PeteEmbleton/Solar_battery_charge_forecast",
@@ -23,6 +23,8 @@
     "HA_battery_charge_rate_sensor": "sensor.solarnet_power_battery_charge",
     "HA_battery_SOC_sensor": "sensor.byd_battery_box_premium_hv_state_of_charge",
     "HA_power_usage_sensor": "sensor.solarnet_power_load_consumed",
+    "HA_mains_power_availble_sensor": "sensor.smart_meter_63a_1_meter_location",
+    "HA_mains_power_availble_sensor_value": "0",
     "system_size_kw": 6.6,
     "battery_size_kwh": 19.7,
     "minimum_soc_percent": 20.0,
@@ -40,7 +42,8 @@
     "mqtt_broker_port": 1883,
     "mqtt_username": "your_mqtt_username",
     "mqtt_password": "your_mqtt_password",
-    "max_battery_charge_rate": 5000
+    "max_battery_charge_rate": 5000,
+    "manual_action": "none"
   },
   "schema": {
     "ha_url": "str",
@@ -48,6 +51,8 @@
     "HA_battery_charge_rate_sensor": "str",
     "HA_battery_SOC_sensor": "str",
     "HA_power_usage_sensor": "str",
+    "HA_mains_power_availble_sensor": "str",
+    "HA_mains_power_availble_sensor_value": "str",
     "system_size_kw": "float",
     "battery_size_kwh": "float",
     "minimum_soc_percent": "float",
@@ -65,6 +70,7 @@
     "mqtt_broker_port": "int",
     "mqtt_username": "str",
     "mqtt_password": "str",
-    "max_battery_charge_rate": "int"
+    "max_battery_charge_rate": "int",
+    "manual_action": "str"
   }
 }
