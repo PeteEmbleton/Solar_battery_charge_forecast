@@ -55,6 +55,8 @@ The add-on learns from your energy usage patterns and weather forecasts to autom
 - `HA_battery_charge_rate_sensor`: Battery charge rate sensor entity
 - `HA_battery_SOC_sensor`: Battery state of charge sensor entity
 - `HA_power_usage_sensor`: Power consumption sensor entity
+- `HA_MAINS_POWER_AVAILBLE_SENSOR` : the home assistant sensor thatr will change when mains power is lost
+- `HA_MAINS_POWER_AVAILBLE_SENSOR_VALUE`: the value the sensor shows when there is mains power available
 
 ### Battery Safety Configuration:
 
